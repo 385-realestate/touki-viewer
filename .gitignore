@@ -17,10 +17,33 @@ touki_viewer_v1.4/_internal/登記簿公図データ/
 
 # ビルド成果物
 build/
-dist/
 releases/
 *.spec
 *.exe
+
+# dist はバイナリを除いてスクリプトのみ追跡
+dist/touki_viewer_v1.5_stage/_internal/*.dll
+dist/touki_viewer_v1.5_stage/_internal/*.pyd
+dist/touki_viewer_v1.5_stage/_internal/*.zip
+dist/touki_viewer_v1.5_stage/_internal/PIL/
+dist/touki_viewer_v1.5_stage/_internal/charset_normalizer/
+dist/touki_viewer_v1.5_stage/_internal/cryptography*/
+dist/touki_viewer_v1.5_stage/_internal/customtkinter/
+dist/touki_viewer_v1.5_stage/_internal/pdfminer/
+dist/touki_viewer_v1.5_stage/_internal/pdfminer_six*/
+dist/touki_viewer_v1.5_stage/_internal/pypdfium2/
+dist/touki_viewer_v1.5_stage/_internal/pypdfium2_raw/
+dist/touki_viewer_v1.5_stage/_internal/tkinterdnd2/
+dist/touki_viewer_v1.5_stage/_internal/_tcl_data/
+dist/touki_viewer_v1.5_stage/_internal/_tk_data/
+dist/touki_viewer_v1.5_stage/_internal/tcl8/
+dist/touki_viewer_v1.5_stage/_internal/__pycache__/
+dist/touki_viewer_v1.5_stage/_internal/scripts/__pycache__/
+dist/touki_viewer_v1.5_stage/_internal/scripts/agents/__pycache__/
+dist/touki_viewer_v1.5_stage/database/
+dist/touki_viewer_v1.5_stage/*.exe
+dist/touki_app/
+dist/touki_viewer_v1.4_stage/
 
 # PyInstaller バイナリ依存（スクリプト以外）
 touki_viewer_v1.4/_internal/*.dll
