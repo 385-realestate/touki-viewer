@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# データベース・出力
+database/
+output/
+output_csv/
+output_geojson/
+reports/
+
+# 登記簿PDFデータ（個人情報・大容量）
+登記簿公図データ/
+touki_viewer_v1.4/_internal/登記簿公図データ/
+
+# ビルド成果物
+build/
+dist/
+releases/
+*.spec
+*.exe
+
+# PyInstaller バイナリ依存（スクリプト以外）
+touki_viewer_v1.4/_internal/*.dll
+touki_viewer_v1.4/_internal/*.pyd
+touki_viewer_v1.4/_internal/*.zip
+touki_viewer_v1.4/_internal/PIL/
+touki_viewer_v1.4/_internal/charset_normalizer/
+touki_viewer_v1.4/_internal/cryptography*/
+touki_viewer_v1.4/_internal/customtkinter/
+touki_viewer_v1.4/_internal/pdfminer/
+touki_viewer_v1.4/_internal/pdfminer_six*/
+touki_viewer_v1.4/_internal/pypdfium2/
+touki_viewer_v1.4/_internal/pypdfium2_raw/
+touki_viewer_v1.4/_internal/tkinterdnd2/
+touki_viewer_v1.4/_internal/_tcl_data/
+touki_viewer_v1.4/_internal/_tk_data/
+touki_viewer_v1.4/_internal/tcl8/
+touki_viewer_v1.4/_internal/__pycache__/
+touki_viewer_v1.4/_internal/scripts/__pycache__/
+touki_viewer_v1.4/_internal/scripts/agents/__pycache__/
+touki_viewer_v1.4/database/
+
+# Claude設定
+.claude/
+
+# 作業ファイル
+_work/
+touki_owner_check/
+
+# Excel出力
+*.xlsx
+
+# SQLite DB
+*.db
+
+# アイコン・バッチ（ローカル専用）
+*.ico
