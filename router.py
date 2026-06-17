@@ -122,7 +122,13 @@ def process_all_parallel(workers: int = None):
 
         for future in as_completed(futures):
             pdf_path = futures[future]
-            result   = future.result()
+            try:
+                result = future.result()
+            except Exception as e:
+                import traceback
+                print(f"  [ERROR 解析フェーズ] {pdf_path.name}: {e}")
+                traceback.print_exc()
+                continue
             if result is None:
                 continue
 

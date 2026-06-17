@@ -14,8 +14,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-APP_VERSION  = "1.5"
-GITHUB_REPO  = "hattav4192/touki-viewer"
+APP_VERSION  = "1.6"
+GITHUB_REPO  = "385-realestate/touki-viewer"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 import tkinter as tk
@@ -170,7 +170,7 @@ class App(TkinterDnD.Tk):
 
                 # updater.bat を作成して実行 → アプリ終了後にファイルを差し替え
                 bat = tmp_dir / "updater.bat"
-                exe = install_dir / "touki_app.exe"
+                exe = install_dir / "touki_viewer.exe"
                 bat.write_text(
                     f'@echo off\r\n'
                     f'timeout /t 3 /noisy >nul\r\n'
