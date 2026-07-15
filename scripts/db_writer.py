@@ -41,7 +41,7 @@ class DbWriter:
         all_cols = ["file_hash"] + fields
         col_str      = ",".join([f'"{c}"' for c in all_cols])
         placeholders = ",".join(["?"] * len(all_cols))
-        values = [record.get(c, "") for c in all_cols]
+        values = [fhash] + [record.get(c, "") for c in fields]
 
         with self._lock:
             self._conn.execute(
@@ -69,7 +69,8 @@ class DbWriter:
         if records:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             diff_path = DIFF_DIR / f"{label}_diff_{timestamp}.csv"
-            with open(diff_path, "w", encoding="utf-8-sig", newline="") as f:
+            with open(diff_path, "w", encoding="utf-8", newline="") as f:
+                f.write('﻿')  # BOM（Excel で文字化けしないように）
                 writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
                 writer.writeheader()
                 writer.writerows(records)
@@ -90,7 +91,8 @@ class DbWriter:
             f'SELECT {col_str} FROM {table} ORDER BY "抽出日時" DESC'
         ).fetchall()
 
-        with open(all_path, "w", encoding="utf-8-sig", newline="") as f:
+        with open(all_path, "w", encoding="utf-8", newline="") as f:
+            f.write('﻿')  # BOM（Excel で文字化けしないように）
             writer = csv.writer(f)
             writer.writerow(fields)
             writer.writerows(rows)

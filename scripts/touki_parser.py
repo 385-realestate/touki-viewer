@@ -13,14 +13,20 @@ import unicodedata
 from pathlib import Path
 from datetime import datetime
 
-# ---- パス設定（スクリプト位置基準の相対パス） ----
-# scripts/ フォルダ内に置かれているため、2階層上がプロジェクトルート
-BASE_DIR   = Path(__file__).parent.parent
-INPUT_DIR  = BASE_DIR / "登記簿公図データ"
-CSV_DIR    = BASE_DIR / "output_csv"
-DB_PATH    = BASE_DIR / "database" / "touki.db"
-REPORT_DIR = BASE_DIR / "reports"
-MAP_DIR    = INPUT_DIR / "map"
+# ---- パス設定 ----
+import sys as _sys
+if getattr(_sys, 'frozen', False):
+    # PyInstaller exe: __file__ は _internal/scripts/ 内を指すため exe の親を使う
+    BASE_DIR = Path(_sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent.parent
+
+_TOUKI_BASE = BASE_DIR / "登記簿公図データ"
+INPUT_DIR   = _TOUKI_BASE          # PDFは登記簿公図データ直下
+MAP_DIR     = _TOUKI_BASE / "公図"
+CSV_DIR     = BASE_DIR / "output_csv"
+DB_PATH     = BASE_DIR / "database" / "touki.db"
+REPORT_DIR  = BASE_DIR / "reports"
 
 
 def setup_dirs():
@@ -87,6 +93,9 @@ def extract_jp_name(cells: list) -> str:
         # \u30d3\u30eb\u30fb\u30d5\u30ed\u30a2\u756a\u53f7\uff08\u4f4f\u6240\u7d9a\u304d\uff09: \u300cA\u30d3\u30eb1\u968e\u300d\u300c\u7b2c3\u30d3\u30eb\u300d\u306a\u3069
         if re.search(r'\u30d3\u30eb[0-9A-Za-z]|[0-9]+\u968e$', s):
             continue
+        # \u5efa\u7269\u540d\uff0b\u968e\u6570\uff08\u4f4f\u6240\u7d9a\u304d\uff09: \u300c\u5bb62F\u300d\u300c\u8cb8\u5bb62F\u300d\u300cB1F\u300d\u306a\u3069\u672b\u5c3e\u304c\u6570\u5b57+F
+        if re.search(r'[0-9]+[FfBb]$', s):
+            continue
         return s
     return ""
 
@@ -96,6 +105,9 @@ def extract_jp_name(cells: list) -> str:
 def detect_type(filename: str, text: str) -> str:
     """'tochi' / 'tatemono' / 'other' を返す"""
     name = filename
+    # 法人登記簿はスキップ（不動産登記ではない）
+    if '法人登記簿' in name:
+        return 'other'
     if '土地全部事項' in name or '土地全部' in name:
         return 'tochi'
     if '建物全部事項' in name or '建物全部' in name:
@@ -161,12 +173,20 @@ def split_sections(t: str) -> dict:
 def parse_hyodai_tochi(t: str) -> dict:
     data = {"所在": "", "地番": "", "地目": "", "地積_m2": ""}
 
-    candidates = re.findall(
-        r'[┃│]\s*((?:[^\s│┃]{1,10}(?:市|郡))\S+?(?:町|丁目|字)\S*?)\s*[│┃\n]', t
-    )
-    candidates = [c for c in candidates if not re.search(r'変更|登記|移記|調製', c)]
-    if candidates:
-        data["所在"] = candidates[-1].strip()
+    # Primary: ┃所 在│ アンカーで直接取得（旧住所（浜北市→浜松市新原 等）にも対応）
+    soi_matches = re.findall(r'┃所\s*在[│┃]\s*([^│┃\n]+)', t)
+    soi_candidates = [s.strip() for s in soi_matches
+                      if not re.search(r'変更|登記|移記|調製', s)]
+    if soi_candidates:
+        data["所在"] = soi_candidates[-1].strip()
+    else:
+        # Fallback: 市郡+町丁目字 パターン
+        candidates = re.findall(
+            r'[┃│]\s*((?:[^\s│┃]{1,10}(?:市|郡))\S+?(?:町|丁目|字)\S*?)\s*[│┃\n]', t
+        )
+        candidates = [c for c in candidates if not re.search(r'変更|登記|移記|調製', c)]
+        if candidates:
+            data["所在"] = candidates[-1].strip()
 
     matches = re.findall(r'[┃│]\s*([0-9]+番[0-9]*)\s*[│┃]', t)
     if matches:
@@ -395,6 +415,11 @@ def parse_kouku(kouku: str) -> dict:
                     name = extract_jp_name(cells)
                     if name:
                         break
+                    # 氏名として採用されなかった行（建物名＋階数などの住所続き）は住所に連結
+                    cell_text = next((c.strip() for c in reversed(cells) if c.strip()), '')
+                    clean = re.sub(r'\s+', '', cell_text)
+                    if clean and re.search(r'[0-9]+[FfBb]$', clean):
+                        addr += clean
 
             # フォールバック：「所有者　浜松市」のように名前が同行にある場合
             if not name and addr:
@@ -838,8 +863,8 @@ def parse_kouku_history(kouku: str) -> list:
                 cell  = next((p.strip() for p in reversed(parts) if p.strip()), '')
                 if not cell or SKIP_RE.search(cell):
                     continue
-                if '共有者' in cell:
-                    addr_part = re.sub(r'共有者\s*', '', cell).strip()
+                if '共有者' in cell or '所有者' in cell:
+                    addr_part = re.sub(r'(共有者|所有者)\s*', '', cell).strip()
                     if _ADDR_RE.search(addr_part):
                         cur_addr = addr_part
                     cur_持分 = ''
@@ -850,10 +875,11 @@ def parse_kouku_history(kouku: str) -> list:
                     cur_持分 = ''
                     prev_was_addr = True
                     continue
-                if re.search(r'[0-9]+分の[0-9]+', cell):
-                    m2 = re.search(r'([0-9]+分の[0-9]+)', cell)
+                # 持分（万含み分数に対応: 5万5280分の5765）
+                if re.search(r'[0-9]+(?:万[0-9]*)?分の[0-9]+', cell):
+                    m2 = re.search(r'([0-9]+(?:万[0-9]*)?)分の([0-9]+)', cell)
                     if m2:
-                        cur_持分 = m2.group(1)
+                        cur_持分 = f"{m2.group(1)}分の{m2.group(2)}"
                     prev_was_addr = False
                     continue
                 clean = re.sub(r'\s+', '', cell)
@@ -1599,14 +1625,14 @@ def parse_otsuku_history(otsuku: str) -> list:
 # ====================================================
 CSV_FIELDS_TOCHI = [
     "ファイル名", "不動産番号", "所在", "地番", "地目", "地積_m2",
-    "所有者氏名", "所有者住所",
+    "所有者氏名", "所有者住所", "現在の所有者",
     "取得原因", "取得日", "受付年月日", "受付番号",
     "抵当権件数", "抵当権債権額", "抵当権債務者", "抵当権者",
     "共同担保一覧", "抽出日時",
 ]
 CSV_FIELDS_TATEMONO = [
     "ファイル名", "不動産番号", "所在", "家屋番号", "種類", "構造", "床面積_m2",
-    "所有者氏名", "所有者住所",
+    "所有者氏名", "所有者住所", "現在の所有者",
     "取得原因", "取得日", "受付年月日", "受付番号",
     "抵当権件数", "抵当権債権額", "抵当権債務者", "抵当権者",
     "共同担保一覧", "抽出日時",

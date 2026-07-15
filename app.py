@@ -14,7 +14,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-APP_VERSION  = "1.5"
+APP_VERSION  = "1.7"
 GITHUB_REPO  = "hattav4192/touki-viewer"
 GITHUB_API   = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -24,10 +24,17 @@ import customtkinter as ctk
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 # ---- パス設定 ----
-BASE_DIR    = Path(__file__).parent
-SCRIPTS_DIR = BASE_DIR / "scripts"
+# PyInstaller frozen時 __file__ は _internal/ を指すため sys.executable を使う
+# scripts は _MEIPASS/_internal/ 下に配置されるため frozen 時は _MEIPASS を参照する
+if getattr(sys, 'frozen', False):
+    BASE_DIR    = Path(sys.executable).parent
+    SCRIPTS_DIR = Path(sys._MEIPASS) / "scripts"
+else:
+    BASE_DIR    = Path(__file__).parent
+    SCRIPTS_DIR = BASE_DIR / "scripts"
 INPUT_DIR   = BASE_DIR / "登記簿公図データ"
 DOWNLOADS   = Path.home() / "Downloads"
+CSV_OUT_DIR = BASE_DIR / "output_csv"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
@@ -39,7 +46,7 @@ ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 
 # ---- UI共通定数 ----
-from ui.constants import C, SEP, TAB_IMPORT, TAB_PROCESS
+from ui.constants import C, SEP, TAB_IMPORT, TAB_PROCESS, TAB_KOUZU
 
 
 # ---- stdout をキューに流すラッパー ----
@@ -82,13 +89,16 @@ class App(TkinterDnD.Tk):
         y = (self.winfo_screenheight() - h) // 2
         self.geometry(f"{w}x{h}+{x}+{y}")
 
-        self._log_queue   = queue.Queue()
-        self._running     = False
-        self._orig_stdout = sys.stdout
-        self._orig_stderr = sys.stderr
+        self._log_queue        = queue.Queue()
+        self._kouzu_log_queue  = queue.Queue()
+        self._running          = False
+        self._orig_stdout      = sys.stdout
+        self._orig_stderr      = sys.stderr
+        self._kouzu_pdf_paths  = []
 
         self._build_ui()
         self._poll_log()
+        self._poll_kouzu_log()
         self._refresh_pdf_list()
 
         self.drop_target_register(DND_FILES)
@@ -170,7 +180,7 @@ class App(TkinterDnD.Tk):
 
                 # updater.bat を作成して実行 → アプリ終了後にファイルを差し替え
                 bat = tmp_dir / "updater.bat"
-                exe = install_dir / "touki_app.exe"
+                exe = install_dir / "touki_viewer.exe"
                 bat.write_text(
                     f'@echo off\r\n'
                     f'timeout /t 3 /noisy >nul\r\n'
@@ -263,9 +273,11 @@ class App(TkinterDnD.Tk):
         self._tabs.pack(fill="both", expand=True, padx=0, pady=0)
         self._tabs.add(TAB_IMPORT)
         self._tabs.add(TAB_PROCESS)
+        self._tabs.add(TAB_KOUZU)
 
         self._build_tab_import(self._tabs.tab(TAB_IMPORT))
         self._build_tab_process(self._tabs.tab(TAB_PROCESS))
+        self._build_tab_kouzu(self._tabs.tab(TAB_KOUZU))
 
         # ===== フッター =====
         footer = ctk.CTkFrame(self, corner_radius=0, fg_color=C["header_bg"], height=30)
@@ -283,41 +295,52 @@ class App(TkinterDnD.Tk):
     # ----------------------------------------------------------------
     def _build_tab_import(self, parent):
 
-        # ---- ドロップゾーン ----
-        drop_outer = ctk.CTkFrame(parent, corner_radius=8, fg_color=C["surface"],
-                                  border_width=2, border_color=C["border"])
-        drop_outer.pack(fill="x", pady=(10, 6), padx=4)
+        # ===== 水平コンテナ（左: PDF一覧、右: ドロップ＋操作）=====
+        container = tk.Frame(parent, bg=C["bg"])
+        container.pack(fill="both", expand=True, padx=4, pady=(6, 4))
 
-        self._drop_frame = tk.Frame(drop_outer, bg=C["surface"], height=110)
+        # ===== 右ペイン: ドロップゾーン ＋ 操作ボタン（固定幅260px）=====
+        right_pane = tk.Frame(container, bg=C["bg"], width=260)
+        right_pane.pack(side="right", fill="y", padx=(8, 0))
+        right_pane.pack_propagate(False)
+
+        # ---- ドロップゾーン ----
+        drop_outer = ctk.CTkFrame(right_pane, corner_radius=8, fg_color=C["surface"],
+                                  border_width=2, border_color=C["border"])
+        drop_outer.pack(fill="x", pady=(0, 8))
+
+        self._drop_frame = tk.Frame(drop_outer, bg=C["surface"])
         self._drop_frame.pack(fill="x", padx=2, pady=2)
-        self._drop_frame.pack_propagate(False)
 
         self._drop_label = tk.Label(
             self._drop_frame,
-            text="ここにPDFをドロップ",
-            font=("Yu Gothic UI", 16, "bold"),
+            text="📄\nここにPDFを\nドロップ",
+            font=("Yu Gothic UI", 13, "bold"),
             bg=C["surface"], fg=C["subtext"],
+            justify="center",
         )
-        self._drop_label.pack(side="left", expand=True, pady=(16, 4))
+        self._drop_label.pack(pady=(14, 8))
 
         select_btn = tk.Button(
             self._drop_frame,
             text="  PDFを選択  ",
-            font=("Yu Gothic UI", 13, "bold"),
+            font=("Yu Gothic UI", 12, "bold"),
             bg=C["accent"], fg="#FFFFFF",
             activebackground=C["accent_h"], activeforeground="#FFFFFF",
-            relief="flat", cursor="hand2", bd=0, padx=14, pady=8,
+            relief="flat", cursor="hand2", bd=0, padx=10, pady=6,
             command=self._select_files,
         )
-        select_btn.pack(side="right", padx=20, pady=16)
+        select_btn.pack(pady=(0, 12))
 
         def _on_enter(_):
             drop_outer.configure(border_color=C["green"], fg_color="#EBF4EB")
             self._drop_label.configure(bg="#EBF4EB", fg=C["green"])
+            self._drop_frame.configure(bg="#EBF4EB")
 
         def _on_leave(_):
             drop_outer.configure(border_color=C["border"], fg_color=C["surface"])
             self._drop_label.configure(bg=C["surface"], fg=C["subtext"])
+            self._drop_frame.configure(bg=C["surface"])
 
         for w in (self._drop_frame, self._drop_label):
             w.drop_target_register(DND_FILES)
@@ -325,84 +348,80 @@ class App(TkinterDnD.Tk):
             w.dnd_bind("<<DragEnter>>", _on_enter)
             w.dnd_bind("<<DragLeave>>", _on_leave)
 
-        # ---- 操作ボタン行 ----
-        action_frame = ctk.CTkFrame(parent, corner_radius=8, fg_color=C["surface2"],
+        # ---- 操作ボタン ----
+        action_frame = ctk.CTkFrame(right_pane, corner_radius=8, fg_color=C["surface2"],
                                     border_width=1, border_color=C["border"])
-        action_frame.pack(fill="x", padx=4, pady=4)
+        action_frame.pack(fill="x")
 
-        # 上段: ダウンロードフォルダ
         ctk.CTkLabel(
             action_frame,
-            text=f"ダウンロードフォルダ:  {DOWNLOADS}",
-            font=ctk.CTkFont("Yu Gothic UI", 13),
+            text="ダウンロードフォルダから取り込む",
+            font=ctk.CTkFont("Yu Gothic UI", 11),
             text_color=C["subtext"],
-        ).pack(anchor="w", padx=14, pady=(8, 4))
-
-        btn_row = ctk.CTkFrame(action_frame, fg_color="transparent")
-        btn_row.pack(fill="x", padx=14, pady=(0, 6))
+        ).pack(anchor="w", padx=10, pady=(8, 4))
 
         ctk.CTkButton(
-            btn_row,
+            action_frame,
             text="📋  コピーして取り込む",
-            font=ctk.CTkFont("Yu Gothic UI", 14, "bold"),
-            width=240, height=38, corner_radius=8,
+            font=ctk.CTkFont("Yu Gothic UI", 13, "bold"),
+            height=36, corner_radius=6,
             fg_color=C["surface"], hover_color=C["border"],
             border_width=1, border_color=C["border"],
             text_color=C["text"],
             command=lambda: self._import_from_downloads(move=False),
-        ).pack(side="left", padx=(0, 10))
+        ).pack(fill="x", padx=10, pady=(0, 4))
 
         ctk.CTkButton(
-            btn_row,
+            action_frame,
             text="✂️  移動して取り込む",
-            font=ctk.CTkFont("Yu Gothic UI", 14, "bold"),
-            width=240, height=38, corner_radius=8,
+            font=ctk.CTkFont("Yu Gothic UI", 13, "bold"),
+            height=36, corner_radius=6,
             fg_color=C["surface"], hover_color=C["border"],
             border_width=1, border_color=C["border"],
             text_color=C["subtext"],
             command=lambda: self._import_from_downloads(move=True),
-        ).pack(side="left")
-
-        # 下段: フォルダスキャン / 自動解析チェック / ショートカット
-        btn_row2 = ctk.CTkFrame(action_frame, fg_color="transparent")
-        btn_row2.pack(fill="x", padx=14, pady=(0, 10))
+        ).pack(fill="x", padx=10, pady=(0, 8))
 
         ctk.CTkButton(
-            btn_row2,
+            action_frame,
             text="📁  フォルダをスキャン",
-            font=ctk.CTkFont("Yu Gothic UI", 14, "bold"),
-            width=240, height=38, corner_radius=6,
+            font=ctk.CTkFont("Yu Gothic UI", 13, "bold"),
+            height=36, corner_radius=6,
             fg_color=C["green"], hover_color=C["green_h"],
             text_color="#FFFFFF",
             command=self._scan_folder,
-        ).pack(side="left", padx=(0, 10))
+        ).pack(fill="x", padx=10, pady=(0, 8))
 
         self._auto_analyze_var = ctk.BooleanVar(value=True)
         ctk.CTkCheckBox(
-            btn_row2,
+            action_frame,
             text="取り込み後に自動解析",
             variable=self._auto_analyze_var,
-            font=ctk.CTkFont("Yu Gothic UI", 13),
+            font=ctk.CTkFont("Yu Gothic UI", 12),
             text_color=C["text"],
             fg_color=C["green"], hover_color=C["green_h"],
             checkmark_color="#FFFFFF",
             border_color=C["border"],
-        ).pack(side="left", padx=(0, 20))
+        ).pack(anchor="w", padx=10, pady=(0, 8))
 
         ctk.CTkButton(
-            btn_row2,
+            action_frame,
             text="🖥  ショートカット作成",
-            font=ctk.CTkFont("Yu Gothic UI", 13),
-            width=180, height=38, corner_radius=6,
+            font=ctk.CTkFont("Yu Gothic UI", 12),
+            height=30, corner_radius=6,
             fg_color=C["surface2"], hover_color=C["border"],
             border_width=1, border_color=C["border"],
             text_color=C["subtext"],
             command=self._create_desktop_shortcut,
-        ).pack(side="right")
+        ).pack(fill="x", padx=10, pady=(0, 10))
 
-        # ---- 取り込み済みPDF一覧 ----
-        list_hdr = ctk.CTkFrame(parent, fg_color="transparent")
-        list_hdr.pack(fill="x", padx=4, pady=(10, 2))
+        # ===== 左ペイン: 取り込み済みPDF一覧 =====
+        left_pane = tk.Frame(container, bg=C["bg"])
+        left_pane.pack(side="left", fill="both", expand=True)
+
+        # 一覧ヘッダー
+        list_hdr = ctk.CTkFrame(left_pane, fg_color="transparent")
+        list_hdr.pack(fill="x", pady=(0, 2))
 
         ctk.CTkLabel(
             list_hdr, text="取り込み済みPDF一覧",
@@ -417,7 +436,6 @@ class App(TkinterDnD.Tk):
             text_color=C["subtext"],
         ).pack(side="left", padx=10)
 
-        # 更新 / 個別解析ボタン
         ctk.CTkButton(
             list_hdr, text="⟳ 更新",
             font=ctk.CTkFont("Yu Gothic UI", 12),
@@ -459,8 +477,8 @@ class App(TkinterDnD.Tk):
             foreground=[("selected", C["header_bg"])],
         )
 
-        tv_frame = tk.Frame(parent, bg=C["border"], highlightthickness=0)
-        tv_frame.pack(fill="both", expand=True, padx=4, pady=(0, 4))
+        tv_frame = tk.Frame(left_pane, bg=C["border"], highlightthickness=0)
+        tv_frame.pack(fill="both", expand=True)
 
         self._tree = ttk.Treeview(
             tv_frame,
@@ -473,10 +491,10 @@ class App(TkinterDnD.Tk):
         self._tree.heading("type",  text="種別")
         self._tree.heading("size",  text="サイズ")
         self._tree.heading("mtime", text="更新日時")
-        self._tree.column("name",  width=380, minwidth=200, stretch=True)
+        self._tree.column("name",  width=340, minwidth=180, stretch=True)
         self._tree.column("type",  width=70,  minwidth=60,  stretch=False, anchor="center")
         self._tree.column("size",  width=80,  minwidth=60,  stretch=False, anchor="e")
-        self._tree.column("mtime", width=150, minwidth=120, stretch=False, anchor="center")
+        self._tree.column("mtime", width=140, minwidth=110, stretch=False, anchor="center")
 
         vsb = ttk.Scrollbar(tv_frame, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=vsb.set)
@@ -600,6 +618,15 @@ class App(TkinterDnD.Tk):
         self._workers_menu.pack(side="left")
 
         ctk.CTkButton(
+            ctrl, text="📂 CSV出力フォルダを開く",
+            font=ctk.CTkFont("Yu Gothic UI", 13),
+            width=200, height=36, corner_radius=4,
+            fg_color=C["accent"], hover_color=C["accent_h"],
+            text_color="#FFFFFF",
+            command=self._open_csv_folder,
+        ).pack(side="right", padx=(4, 4))
+
+        ctk.CTkButton(
             ctrl, text="ログクリア",
             font=ctk.CTkFont("Yu Gothic UI", 13),
             width=100, height=36, corner_radius=4,
@@ -607,7 +634,7 @@ class App(TkinterDnD.Tk):
             border_color=C["border"], text_color=C["muted"],
             hover_color=C["surface2"],
             command=self._clear_log,
-        ).pack(side="right", padx=12)
+        ).pack(side="right", padx=(0, 4))
 
         # プログレスバー
         self._progress = ctk.CTkProgressBar(
@@ -666,6 +693,9 @@ class App(TkinterDnD.Tk):
     #  ドロップ処理
     # ----------------------------------------------------------------
     def _on_drop(self, event):
+        if self._tabs.get() == TAB_KOUZU:
+            self._on_kouzu_drop(event)
+            return
         self._tabs.set(TAB_IMPORT)
         self.update_idletasks()
 
@@ -840,6 +870,11 @@ class App(TkinterDnD.Tk):
             if not silent:
                 messagebox.showerror("エラー", f"ショートカット作成に失敗しました:\n{e}")
 
+    def _open_csv_folder(self):
+        import subprocess
+        CSV_OUT_DIR.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(["explorer", str(CSV_OUT_DIR)])
+
     def _status_msg(self, text: str):
         self._footer_var.set(text)
 
@@ -922,6 +957,290 @@ class App(TkinterDnD.Tk):
             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         )
         self._refresh_pdf_list()  # 一括解析後も一覧を更新
+
+
+    # ----------------------------------------------------------------
+    #  タブ3: 公図変換
+    # ----------------------------------------------------------------
+    def _build_tab_kouzu(self, parent):
+        container = tk.Frame(parent, bg=C["bg"])
+        container.pack(fill="both", expand=True, padx=4, pady=(6, 4))
+
+        # ===== 左ペイン: 制御パネル (260px) =====
+        left_pane = tk.Frame(container, bg=C["bg"], width=260)
+        left_pane.pack(side="left", fill="y", padx=(0, 8))
+        left_pane.pack_propagate(False)
+
+        panel = ctk.CTkFrame(left_pane, corner_radius=8, fg_color=C["surface"])
+        panel.pack(fill="both", expand=True)
+
+        ctk.CTkLabel(
+            panel, text="公図 → JWC / DXF 変換",
+            font=ctk.CTkFont("Yu Gothic UI", 14, "bold"),
+            text_color=C["header_bg"],
+        ).pack(anchor="w", padx=14, pady=(14, 8))
+
+        # ドロップゾーン（DnD は tk.Frame/Label が必要）
+        drop_outer = ctk.CTkFrame(panel, corner_radius=6, fg_color=C["surface2"],
+                                  border_width=2, border_color=C["border"])
+        drop_outer.pack(fill="x", padx=10, pady=(0, 8))
+
+        self._kouzu_drop_frame = tk.Frame(drop_outer, bg=C["surface2"])
+        self._kouzu_drop_frame.pack(fill="x", padx=2, pady=2)
+
+        self._kouzu_drop_label = tk.Label(
+            self._kouzu_drop_frame,
+            text="🗺\n公図PDFを\nここにドロップ",
+            font=("Yu Gothic UI", 13, "bold"),
+            bg=C["surface2"], fg=C["subtext"],
+            justify="center",
+        )
+        self._kouzu_drop_label.pack(pady=(12, 6))
+
+        ctk.CTkButton(
+            self._kouzu_drop_frame,
+            text="PDFを選択",
+            font=ctk.CTkFont("Yu Gothic UI", 12, "bold"),
+            height=30, corner_radius=4,
+            fg_color=C["accent"], hover_color=C["accent_h"],
+            text_color="#FFFFFF",
+            command=self._kouzu_select_file,
+        ).pack(fill="x", padx=10, pady=(0, 10))
+
+        def _drop_enter(_):
+            drop_outer.configure(border_color=C["green"], fg_color="#EBF4EB")
+            self._kouzu_drop_label.configure(bg="#EBF4EB", fg=C["green"])
+            self._kouzu_drop_frame.configure(bg="#EBF4EB")
+
+        def _drop_leave(_):
+            drop_outer.configure(border_color=C["border"], fg_color=C["surface2"])
+            self._kouzu_drop_label.configure(bg=C["surface2"], fg=C["subtext"])
+            self._kouzu_drop_frame.configure(bg=C["surface2"])
+
+        for w in (self._kouzu_drop_frame, self._kouzu_drop_label):
+            w.drop_target_register(DND_FILES)
+            w.dnd_bind("<<Drop>>",      self._on_kouzu_drop)
+            w.dnd_bind("<<DragEnter>>", _drop_enter)
+            w.dnd_bind("<<DragLeave>>", _drop_leave)
+
+        # 縮尺設定
+        ctk.CTkLabel(
+            panel, text="縮尺",
+            font=ctk.CTkFont("Yu Gothic UI", 12, "bold"),
+            text_color=C["subtext"],
+        ).pack(anchor="w", padx=14, pady=(0, 2))
+
+        self._kouzu_scale_var = ctk.StringVar(value="auto（自動検出）")
+        ctk.CTkOptionMenu(
+            panel,
+            values=["auto（自動検出）", "1:500", "1:250", "1:1000", "1:200", "1:100"],
+            variable=self._kouzu_scale_var,
+            font=ctk.CTkFont("Yu Gothic UI", 12),
+            height=30, corner_radius=4,
+            fg_color=C["surface2"],
+            text_color=C["text"],
+        ).pack(fill="x", padx=14, pady=(0, 8))
+
+        # 出力形式
+        ctk.CTkLabel(
+            panel, text="出力形式",
+            font=ctk.CTkFont("Yu Gothic UI", 12, "bold"),
+            text_color=C["subtext"],
+        ).pack(anchor="w", padx=14, pady=(0, 2))
+
+        self._kouzu_fmt_var = ctk.StringVar(value="jwc")
+        fmt_frame = ctk.CTkFrame(panel, fg_color="transparent")
+        fmt_frame.pack(fill="x", padx=14, pady=(0, 10))
+
+        for val, label in [("jwc", "JWC (Jw_cad)"), ("dxf", "DXF (AutoCAD互換)")]:
+            ctk.CTkRadioButton(
+                fmt_frame, text=label, variable=self._kouzu_fmt_var, value=val,
+                font=ctk.CTkFont("Yu Gothic UI", 12),
+                fg_color=C["green"], hover_color=C["green_h"],
+                text_color=C["text"],
+            ).pack(anchor="w", pady=2)
+
+        # 変換ボタン
+        self._kouzu_btn = ctk.CTkButton(
+            panel, text="🔄  変換開始",
+            font=ctk.CTkFont("Yu Gothic UI", 13, "bold"),
+            height=40, corner_radius=6,
+            fg_color=C["green"], hover_color=C["green_h"],
+            text_color="#FFFFFF",
+            state="disabled",
+            command=self._kouzu_start,
+        )
+        self._kouzu_btn.pack(fill="x", padx=14, pady=(0, 8))
+
+        ctk.CTkButton(
+            panel, text="📁  出力先フォルダを開く",
+            font=ctk.CTkFont("Yu Gothic UI", 12),
+            height=30, corner_radius=4,
+            fg_color=C["surface2"], hover_color=C["border"],
+            border_width=1, border_color=C["border"],
+            text_color=C["subtext"],
+            command=self._kouzu_open_output,
+        ).pack(fill="x", padx=14, pady=(0, 12))
+
+        # ===== 右ペイン: ログ =====
+        right_pane = tk.Frame(container, bg=C["bg"])
+        right_pane.pack(side="left", fill="both", expand=True)
+
+        log_hdr = ctk.CTkFrame(right_pane, fg_color="transparent")
+        log_hdr.pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            log_hdr, text="変換ログ",
+            font=ctk.CTkFont("Yu Gothic UI", 14, "bold"),
+            text_color=C["header_bg"],
+        ).pack(side="left")
+
+        self._kouzu_status_var = ctk.StringVar(value="PDFをドロップして変換を開始してください")
+        ctk.CTkLabel(
+            log_hdr, textvariable=self._kouzu_status_var,
+            font=ctk.CTkFont("Yu Gothic UI", 12),
+            text_color=C["subtext"],
+        ).pack(side="left", padx=12)
+
+        ctk.CTkButton(
+            log_hdr, text="クリア",
+            font=ctk.CTkFont("Yu Gothic UI", 11),
+            width=60, height=26, corner_radius=4,
+            fg_color="transparent", border_width=1,
+            border_color=C["border"], text_color=C["subtext"],
+            hover_color=C["surface2"],
+            command=self._kouzu_clear_log,
+        ).pack(side="right")
+
+        log_frame = tk.Frame(right_pane, bg=C["border"])
+        log_frame.pack(fill="both", expand=True)
+
+        self._kouzu_log_box = ctk.CTkTextbox(
+            log_frame,
+            font=ctk.CTkFont("Consolas", 12),
+            text_color=C["text"],
+            fg_color=C["surface"],
+            border_width=0,
+            state="disabled",
+            wrap="none",
+        )
+        self._kouzu_log_box.pack(fill="both", expand=True, padx=1, pady=1)
+
+    # ----------------------------------------------------------------
+    #  公図変換: 操作ハンドラー
+    # ----------------------------------------------------------------
+    def _on_kouzu_drop(self, event):
+        raw = event.data.strip()
+        try:
+            paths = self.tk.splitlist(raw)
+        except Exception:
+            paths = raw.split()
+        pdfs = [p for p in paths if str(p).lower().endswith('.pdf')]
+        if pdfs:
+            self._kouzu_pdf_paths = pdfs
+            names = ", ".join(Path(p).name for p in pdfs)
+            self._kouzu_drop_label.configure(text=f"📄 {names[:36]}…" if len(names) > 38 else f"📄 {names}")
+            self._kouzu_btn.configure(state="normal")
+            self._kouzu_status_var.set(f"{len(pdfs)} 件 選択済み — 変換を開始してください")
+        else:
+            self._kouzu_status_var.set("PDFが見つかりませんでした")
+
+    def _kouzu_select_file(self):
+        files = filedialog.askopenfilenames(
+            title="公図PDFを選択",
+            filetypes=[("PDFファイル", "*.pdf *.PDF"), ("全ファイル", "*.*")],
+            initialdir=Path.home() / "Downloads",
+        )
+        if files:
+            self._kouzu_pdf_paths = list(files)
+            names = ", ".join(Path(p).name for p in files)
+            self._kouzu_drop_label.configure(text=f"📄 {names[:36]}…" if len(names) > 38 else f"📄 {names}")
+            self._kouzu_btn.configure(state="normal")
+            self._kouzu_status_var.set(f"{len(files)} 件 選択済み — 変換を開始してください")
+
+    def _kouzu_start(self):
+        if not self._kouzu_pdf_paths:
+            return
+
+        scale_str = self._kouzu_scale_var.get()
+        if scale_str.startswith("auto"):
+            scale = None
+        else:
+            scale = int(scale_str.split(":")[1])
+
+        fmt  = self._kouzu_fmt_var.get()
+        pdfs = list(self._kouzu_pdf_paths)
+
+        self._kouzu_btn.configure(state="disabled", text="⏳  変換中...")
+        self._kouzu_status_var.set("変換中...")
+        self._kouzu_clear_log()
+
+        def _worker():
+            sys.stdout = _QueueWriter(self._kouzu_log_queue, self._orig_stdout)
+            sys.stderr = _QueueWriter(self._kouzu_log_queue, self._orig_stderr)
+            ok, ng = 0, 0
+            try:
+                from kouzu_to_jwc import convert
+                for pdf in pdfs:
+                    pdf_path = Path(pdf)
+                    print(f"処理中: {pdf_path.name}")
+                    try:
+                        text, scale_used, n_lines, n_texts = convert(pdf_path, scale, fmt)
+                        out_path = pdf_path.with_suffix('.' + fmt)
+                        enc = 'cp932' if fmt == 'jwc' else 'utf-8'
+                        out_path.write_text(text, encoding=enc, errors='replace')
+                        print(f"  ✓ {out_path.name}")
+                        print(f"     縮尺 1:{scale_used} / 線分 {n_lines} / テキスト {n_texts}\n")
+                        ok += 1
+                    except Exception as e:
+                        import traceback
+                        print(f"  ✗ エラー: {e}")
+                        traceback.print_exc()
+                        ng += 1
+            finally:
+                sys.stdout = self._orig_stdout
+                sys.stderr = self._orig_stderr
+            self.after(0, self._kouzu_on_done, ok, ng, pdfs)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _kouzu_on_done(self, ok: int, ng: int, pdfs: list):
+        self._kouzu_btn.configure(state="normal", text="🔄  変換開始")
+        if ng == 0:
+            msg = f"✓  {ok} 件 変換完了"
+            self._kouzu_status_var.set(msg)
+            self._footer_var.set(f"✓ 公図変換完了 {ok}件  {datetime.now().strftime('%H:%M')}")
+        else:
+            self._kouzu_status_var.set(f"✓ {ok}件 / ✗ {ng}件 エラー")
+
+    def _kouzu_open_output(self):
+        import subprocess
+        if self._kouzu_pdf_paths:
+            folder = Path(self._kouzu_pdf_paths[0]).parent
+        else:
+            folder = INPUT_DIR / "公図"
+            folder.mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(["explorer", str(folder)])
+
+    def _kouzu_clear_log(self):
+        self._kouzu_log_box.configure(state="normal")
+        self._kouzu_log_box.delete("1.0", "end")
+        self._kouzu_log_box.configure(state="disabled")
+
+    def _kouzu_append_log(self, text: str):
+        self._kouzu_log_box.configure(state="normal")
+        self._kouzu_log_box.insert("end", text)
+        self._kouzu_log_box.see("end")
+        self._kouzu_log_box.configure(state="disabled")
+
+    def _poll_kouzu_log(self):
+        try:
+            while True:
+                text = self._kouzu_log_queue.get_nowait()
+                self._kouzu_append_log(text)
+        except queue.Empty:
+            pass
+        self.after(100, self._poll_kouzu_log)
 
 
 # ================================================================

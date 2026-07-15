@@ -47,5 +47,6 @@ C: dict = {
 
 TAB_IMPORT  = "📂  PDF取り込み"
 TAB_PROCESS = "▶   解析"
+TAB_KOUZU   = "🗺  公図変換"
 
 SEP = "；"   # パーサーと同じ区切り文字

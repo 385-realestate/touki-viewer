@@ -13,16 +13,21 @@ import unicodedata
 from pathlib import Path
 from datetime import datetime
 
-# ---- パス設定 ----
-BASE_DIR   = Path("c:/Users/kamakei-t/Documents/touki_db")
-INPUT_DIR  = BASE_DIR / "登記簿公図データ"
+# ---- パス設定（スクリプト位置基準の相対パス） ----
+# scripts/ フォルダ内に置かれているため、2階層上がプロジェクトルート
+BASE_DIR   = Path(__file__).parent.parent
+_TOUKI_BASE = BASE_DIR / "登記簿公図データ"
+INPUT_DIR  = _TOUKI_BASE / "登記簿"
+MAP_DIR    = _TOUKI_BASE / "公図"
 CSV_DIR    = BASE_DIR / "output_csv"
 DB_PATH    = BASE_DIR / "database" / "touki.db"
 REPORT_DIR = BASE_DIR / "reports"
-MAP_DIR    = INPUT_DIR / "map"
 
-for d in [CSV_DIR, DB_PATH.parent, REPORT_DIR, MAP_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+
+def setup_dirs():
+    """必要なディレクトリを作成する（明示的に呼び出す）"""
+    for d in [CSV_DIR, DB_PATH.parent, REPORT_DIR, MAP_DIR]:
+        d.mkdir(parents=True, exist_ok=True)
 
 # ---- 全角→半角変換 ----
 def zen2han(text: str) -> str:
@@ -92,6 +97,9 @@ def extract_jp_name(cells: list) -> str:
 def detect_type(filename: str, text: str) -> str:
     """'tochi' / 'tatemono' / 'other' を返す"""
     name = filename
+    # 法人登記簿はスキップ（不動産登記ではない）
+    if '法人登記簿' in name:
+        return 'other'
     if '土地全部事項' in name or '土地全部' in name:
         return 'tochi'
     if '建物全部事項' in name or '建物全部' in name:
@@ -157,12 +165,20 @@ def split_sections(t: str) -> dict:
 def parse_hyodai_tochi(t: str) -> dict:
     data = {"所在": "", "地番": "", "地目": "", "地積_m2": ""}
 
-    candidates = re.findall(
-        r'[┃│]\s*((?:[^\s│┃]{1,10}(?:市|郡))\S+?(?:町|丁目|字)\S*?)\s*[│┃\n]', t
-    )
-    candidates = [c for c in candidates if not re.search(r'変更|登記|移記|調製', c)]
-    if candidates:
-        data["所在"] = candidates[-1].strip()
+    # Primary: ┃所 在│ アンカーで直接取得（旧住所（浜北市→浜松市新原 等）にも対応）
+    soi_matches = re.findall(r'┃所\s*在[│┃]\s*([^│┃\n]+)', t)
+    soi_candidates = [s.strip() for s in soi_matches
+                      if not re.search(r'変更|登記|移記|調製', s)]
+    if soi_candidates:
+        data["所在"] = soi_candidates[-1].strip()
+    else:
+        # Fallback: 市郡+町丁目字 パターン
+        candidates = re.findall(
+            r'[┃│]\s*((?:[^\s│┃]{1,10}(?:市|郡))\S+?(?:町|丁目|字)\S*?)\s*[│┃\n]', t
+        )
+        candidates = [c for c in candidates if not re.search(r'変更|登記|移記|調製', c)]
+        if candidates:
+            data["所在"] = candidates[-1].strip()
 
     matches = re.findall(r'[┃│]\s*([0-9]+番[0-9]*)\s*[│┃]', t)
     if matches:
@@ -332,14 +348,14 @@ def parse_kouku(kouku: str) -> dict:
             # 「共有者」キーワード（住所が同行に続く場合も考慮）
             if '共有者' in cell:
                 addr_part = re.sub(r'共有者\s*', '', cell).strip()
-                if _ADDR_RE.search(addr_part):
+                if re.search(r'番地|丁目|[0-9]+番[0-9]+号', addr_part):
                     cur_addr = addr_part
                 cur_持分 = ''
                 prev_was_addr = False
                 continue
 
             # 住所行: 番地・丁目・○番○号 を含む
-            if _ADDR_RE.search(cell):
+            if re.search(r'番地|丁目|[0-9]+番[0-9]+号', cell):
                 cur_addr = cell
                 cur_持分 = ''
                 prev_was_addr = True
@@ -834,8 +850,8 @@ def parse_kouku_history(kouku: str) -> list:
                 cell  = next((p.strip() for p in reversed(parts) if p.strip()), '')
                 if not cell or SKIP_RE.search(cell):
                     continue
-                if '共有者' in cell:
-                    addr_part = re.sub(r'共有者\s*', '', cell).strip()
+                if '共有者' in cell or '所有者' in cell:
+                    addr_part = re.sub(r'(共有者|所有者)\s*', '', cell).strip()
                     if _ADDR_RE.search(addr_part):
                         cur_addr = addr_part
                     cur_持分 = ''
@@ -846,10 +862,11 @@ def parse_kouku_history(kouku: str) -> list:
                     cur_持分 = ''
                     prev_was_addr = True
                     continue
-                if re.search(r'[0-9]+分の[0-9]+', cell):
-                    m2 = re.search(r'([0-9]+分の[0-9]+)', cell)
+                # 持分（万含み分数に対応: 5万5280分の5765）
+                if re.search(r'[0-9]+(?:万[0-9]*)?分の[0-9]+', cell):
+                    m2 = re.search(r'([0-9]+(?:万[0-9]*)?)分の([0-9]+)', cell)
                     if m2:
-                        cur_持分 = m2.group(1)
+                        cur_持分 = f"{m2.group(1)}分の{m2.group(2)}"
                     prev_was_addr = False
                     continue
                 clean = re.sub(r'\s+', '', cell)
@@ -1264,6 +1281,22 @@ def parse_kouku_history(kouku: str) -> list:
                 for nm in _cum
             )
 
+    # ── 付記名称変更を _cumulative に反映 ──────────────────────────────────────
+    # 「2付記X号 登記名義人名称変更」等で社名・氏名が変更された場合、
+    # _cumulative のキー（旧名）を新名に置換して「現在の所有者」カードに正しく表示させる
+    for _nb in blocks:
+        if not (_nb.get("_is_fuki_meigi")
+                and _nb.get("元の氏名")
+                and _nb.get("所有者氏名")):
+            continue
+        _old_key = _nb["元の氏名"]
+        _new_key = _nb["所有者氏名"]
+        for _tgt in blocks:
+            if "_cumulative" not in _tgt:
+                continue
+            if _old_key in _tgt["_cumulative"]:
+                _tgt["_cumulative"][_new_key] = _tgt["_cumulative"].pop(_old_key)
+
     return blocks
 
 
@@ -1579,14 +1612,14 @@ def parse_otsuku_history(otsuku: str) -> list:
 # ====================================================
 CSV_FIELDS_TOCHI = [
     "ファイル名", "不動産番号", "所在", "地番", "地目", "地積_m2",
-    "所有者氏名", "所有者住所",
+    "所有者氏名", "所有者住所", "現在の所有者",
     "取得原因", "取得日", "受付年月日", "受付番号",
     "抵当権件数", "抵当権債権額", "抵当権債務者", "抵当権者",
     "共同担保一覧", "抽出日時",
 ]
 CSV_FIELDS_TATEMONO = [
     "ファイル名", "不動産番号", "所在", "家屋番号", "種類", "構造", "床面積_m2",
-    "所有者氏名", "所有者住所",
+    "所有者氏名", "所有者住所", "現在の所有者",
     "取得原因", "取得日", "受付年月日", "受付番号",
     "抵当権件数", "抵当権債権額", "抵当権債務者", "抵当権者",
     "共同担保一覧", "抽出日時",
@@ -1629,130 +1662,5 @@ def file_md5(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-# ====================================================
-# メイン処理
-# ====================================================
-def process_all():
-    conn = sqlite3.connect(DB_PATH)
-    init_db(conn)
-
-    seen_keys = set()
-    pdf_files = []
-    for p in sorted(INPUT_DIR.rglob("*")):
-        if p.suffix.lower() != ".pdf":
-            continue
-        if MAP_DIR in p.parents:
-            continue
-        key = str(p).lower()
-        if key not in seen_keys:
-            seen_keys.add(key)
-            pdf_files.append(p)
-    print(f"PDFファイル検出: {len(pdf_files)}件（サブフォルダ含む）")
-
-    new_tochi     = []
-    new_tatemono  = []
-    skip_count    = 0
-
-    for pdf_path in pdf_files:
-        fhash = file_md5(pdf_path)
-        row = conn.execute(
-            "SELECT file_hash FROM processed_files WHERE file_path=?",
-            (str(pdf_path),)
-        ).fetchone()
-        if row and row[0] == fhash:
-            skip_count += 1
-            continue
-
-        print(f"  [処理] {pdf_path.name}")
-        try:
-            text = extract_text(pdf_path)
-
-            # 地図・非対応PDFの検出と移動
-            if not re.search(r'表\s*題\s*部|不動産番号', zen2han(text)):
-                dest = MAP_DIR / pdf_path.name
-                if dest.exists():
-                    dest.unlink()
-                pdf_path.rename(dest)
-                print(f"  [地図/非対応→移動] {pdf_path.name} → map/")
-                continue
-
-            record, doc_type = parse_touki(text, pdf_path.name)
-
-            if doc_type == 'other' or record is None:
-                print(f"  [スキップ] 種別不明: {pdf_path.name}")
-                continue
-
-            record["file_hash"] = fhash
-            table = "touki_tochi" if doc_type == "tochi" else "touki_tatemono"
-            fields = CSV_FIELDS_TOCHI if doc_type == "tochi" else CSV_FIELDS_TATEMONO
-            all_cols = ["file_hash"] + fields
-            col_str = ",".join([f'"{c}"' for c in all_cols])
-            placeholders = ",".join(["?"] * len(all_cols))
-            conn.execute(
-                f'INSERT OR REPLACE INTO {table} ({col_str}) VALUES ({placeholders})',
-                [record.get(c, "") for c in all_cols]
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO processed_files VALUES (?,?,?,?)",
-                (str(pdf_path), fhash, doc_type, datetime.now().isoformat())
-            )
-            conn.commit()
-
-            if doc_type == "tochi":
-                new_tochi.append(record)
-            else:
-                new_tatemono.append(record)
-
-        except Exception as e:
-            import traceback
-            print(f"  [ERROR] {pdf_path.name}: {e}")
-            traceback.print_exc()
-
-    today = datetime.now().strftime("%Y%m%d")
-
-    # 土地CSV
-    if new_tochi:
-        csv_path = CSV_DIR / f"tochi_diff_{today}.csv"
-        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS_TOCHI, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(new_tochi)
-        print(f"\n[土地CSV] {csv_path.name}  {len(new_tochi)}件")
-
-    # 建物CSV
-    if new_tatemono:
-        csv_path = CSV_DIR / f"tatemono_diff_{today}.csv"
-        with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS_TATEMONO, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(new_tatemono)
-        print(f"[建物CSV] {csv_path.name}  {len(new_tatemono)}件")
-
-    print(f"スキップ: {skip_count}件")
-
-    # レポート
-    report_path = REPORT_DIR / f"update_{today}.md"
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write(f"# 登記簿処理レポート {today}\n\n")
-        f.write(f"- 土地: {len(new_tochi)}件\n")
-        f.write(f"- 建物: {len(new_tatemono)}件\n")
-        f.write(f"- スキップ: {skip_count}件\n\n")
-        for label, records, fields in [
-            ("土地", new_tochi, CSV_FIELDS_TOCHI),
-            ("建物", new_tatemono, CSV_FIELDS_TATEMONO),
-        ]:
-            if records:
-                f.write(f"## {label}\n\n")
-                for r in records:
-                    key = r.get("地番") or r.get("家屋番号") or "?"
-                    f.write(f"### {key} ({r.get('所在','')})\n")
-                    for k in fields:
-                        v = r.get(k, "")
-                        if v and k != "ファイル名":
-                            f.write(f"- {k}: {v}\n")
-                    f.write("\n")
-
-    conn.close()
-
-if __name__ == "__main__":
-    process_all()
+# このファイルはライブラリとして使用します。
+# バッチ処理のエントリポイントは router.py を使用してください。

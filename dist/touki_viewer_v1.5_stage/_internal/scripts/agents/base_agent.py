@@ -25,9 +25,20 @@ def _accumulate_mochikomi(kouku_hist: list, sep: str = '；') -> dict:
     def bn(s: str) -> str:
         return _bare.sub('', s).strip()
 
+    def _parse_num(n: str) -> int:
+        """'5万5280' → 55280、通常数字はそのまま int 変換"""
+        m = re.match(r'([0-9]+)万([0-9]*)', n)
+        if m:
+            return int(m.group(1)) * 10000 + (int(m.group(2)) if m.group(2) else 0)
+        return int(n) if n.isdigit() else 0
+
     def pf(s: str) -> Fraction:
-        m = re.search(r'([0-9]+)分の([0-9]+)', s)
-        return Fraction(int(m.group(2)), int(m.group(1))) if m else Fraction(0)
+        m = re.search(r'([0-9]+(?:万[0-9]*)?)分の([0-9]+)', s)
+        if not m:
+            return Fraction(0)
+        denom = _parse_num(m.group(1))
+        numer = int(m.group(2))
+        return Fraction(numer, denom) if denom > 0 and numer <= denom else Fraction(0)
 
     for b in kouku_hist:
         if b.get('状態') == '参考':
@@ -215,6 +226,13 @@ class BaseAgent:
                     _cur = record.get("所有者氏名", "")
                     if _old_nm in _cur:
                         record["所有者氏名"] = _cur.replace(_old_nm, _new_nm)
+
+            # 所有権敷地権（マンション敷地）の場合: 直接の所有者名はなく区分所有者全員が共有
+            if not record.get("所有者氏名") and re.search(r'所有権敷地権', sec.get("kouku", "")):
+                record["所有者氏名"] = "（マンション敷地権）"
+
+            # 現在の所有者が特定できた場合に○を付与（ピボット抽出用）
+            record["現在の所有者"] = "○" if record.get("所有者氏名") else ""
 
             return {
                 "record":   record,

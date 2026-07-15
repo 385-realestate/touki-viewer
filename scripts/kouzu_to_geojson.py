@@ -12,7 +12,13 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-OUTPUT_DIR = Path("C:/Users/kamakei-t/Documents/touki_db/output_geojson")
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_BASE_DIR = next(
+    (p for p in [_SCRIPT_DIR.parent, _SCRIPT_DIR.parent.parent, _SCRIPT_DIR.parent.parent.parent]
+     if (p / "登記簿公図データ").exists()),
+    _SCRIPT_DIR.parent,
+)
+OUTPUT_DIR = _BASE_DIR / "output_geojson"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -188,7 +194,7 @@ def apply_gcp(geojson: dict, gcps: list) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="公図PDF → GeoJSON 変換")
-    parser.add_argument("pdf", nargs="?", help="対象PDFパス（省略時: map/フォルダ内を一括処理）")
+    parser.add_argument("pdf", nargs="?", help="対象PDFパス（省略時: 公図/フォルダ内を一括処理）")
     parser.add_argument("--dpi", type=int, default=200, help="ラスター化解像度 (default: 200)")
     parser.add_argument("--min-area", type=int, default=500,
                         help="最小面積（ピクセル^2）。ノイズ除去（default: 500）")
@@ -203,15 +209,15 @@ def main():
         with open(args.gcp[0], encoding="utf-8") as f:
             gcps = json.load(f)
 
-    base = Path("C:/Users/kamakei-t/Documents/touki_db")
+    base = _BASE_DIR
 
     if args.pdf:
         targets = [Path(args.pdf)]
     else:
-        targets = list((base / "登記簿公図データ" / "map").glob("**/*.PDF"))
-        targets += list((base / "登記簿公図データ" / "map").glob("**/*.pdf"))
-        targets += list((base / "登記簿公図データ").glob("*地図*.PDF"))
-        print(f"{len(targets)} 件の地図PDFを処理します")
+        kouzu_dir = base / "登記簿公図データ" / "公図"
+        targets = list(kouzu_dir.glob("**/*.PDF"))
+        targets += list(kouzu_dir.glob("**/*.pdf"))
+        print(f"{len(targets)} 件の公図PDFを処理します")
 
     ok, ng = 0, 0
     for pdf_path in targets:
