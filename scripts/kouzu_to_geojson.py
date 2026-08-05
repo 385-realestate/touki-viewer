@@ -25,16 +25,27 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 # ---- ベクターPDF処理 ----
 
 def vector_to_geojson(pdf_path: Path) -> dict:
+    """
+    1つのdrawing内の独立したitem（line/curve/rect/quad）を単一のcoordsに
+    連結すると、無関係な線分の間に存在しない接続線が生まれてしまう
+    （旧実装のバグ）。item単位で個別のFeatureとして出力する。
+    """
     pdf = fitz.open(str(pdf_path))
     features = []
     for page_num, page in enumerate(pdf):
         drawings = page.get_drawings()
         for i, d in enumerate(drawings):
-            coords = []
+            props = {
+                "page": page_num + 1,
+                "index": i,
+                "color": d.get("color"),
+                "fill": d.get("fill"),
+                "width": d.get("width"),
+            }
             for item in d["items"]:
+                coords = None
                 if item[0] == "l":       # line
-                    coords.append(list(item[1]))
-                    coords.append(list(item[2]))
+                    coords = [list(item[1]), list(item[2])]
                 elif item[0] == "re":    # rectangle
                     r = item[1]
                     coords = [
@@ -44,26 +55,28 @@ def vector_to_geojson(pdf_path: Path) -> dict:
                 elif item[0] == "qu":    # quad
                     q = item[1]
                     coords = [list(pt) for pt in [q.ul, q.ur, q.lr, q.ll, q.ul]]
-                elif item[0] == "c":     # curve (3点で近似)
-                    coords.append(list(item[1]))
-                    coords.append(list(item[4]))
+                elif item[0] == "c":     # curve (始点・終点の2点で近似)
+                    coords = [list(item[1]), list(item[4])]
 
-            if len(coords) >= 2:
-                geom_type = "Polygon" if coords[0] == coords[-1] else "LineString"
-                coords_val = [coords] if geom_type == "Polygon" else coords
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": geom_type, "coordinates": coords_val},
-                    "properties": {
-                        "page": page_num + 1,
-                        "index": i,
-                        "color": d.get("color"),
-                        "fill": d.get("fill"),
-                        "width": d.get("width"),
-                    }
-                })
+                if coords and len(coords) >= 2:
+                    geom_type = "Polygon" if coords[0] == coords[-1] else "LineString"
+                    coords_val = [coords] if geom_type == "Polygon" else coords
+                    features.append({
+                        "type": "Feature",
+                        "geometry": {"type": geom_type, "coordinates": coords_val},
+                        "properties": dict(props),
+                    })
     pdf.close()
-    return {"type": "FeatureCollection", "features": features}
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "_meta": {
+            "source": pdf_path.name,
+            "coordinate_system": "pdf_points (origin: top-left)",
+            "feature_count": len(features),
+            "generated": datetime.now().isoformat(timespec="seconds"),
+        }
+    }
 
 
 # ---- ラスターPDF処理 ----
@@ -180,11 +193,17 @@ def apply_gcp(geojson: dict, gcps: list) -> dict:
         return [round(pt[0] / pt[2], 8), round(pt[1] / pt[2], 8)]
 
     for feat in geojson["features"]:
-        rings = feat["geometry"]["coordinates"]
-        feat["geometry"]["coordinates"] = [
-            [transform(x, y) for x, y in ring] for ring in rings
-        ]
+        geom = feat["geometry"]
+        if geom["type"] == "LineString":
+            # LineStringはPolygonと違いring(入れ子)構造ではなく点の平坦なリスト
+            geom["coordinates"] = [transform(x, y) for x, y in geom["coordinates"]]
+        elif geom["type"] == "Polygon":
+            geom["coordinates"] = [
+                [transform(x, y) for x, y in ring] for ring in geom["coordinates"]
+            ]
 
+    # vector_to_geojson()の出力にも_metaを付与しているが、念のため欠落時も落ちないようにする
+    geojson.setdefault("_meta", {})
     geojson["_meta"]["coordinate_system"] = "WGS84 (EPSG:4326)"
     geojson["_meta"]["gcps"] = gcps
     return geojson

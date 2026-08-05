@@ -129,15 +129,18 @@ def _raster_extract(pdf_path, scale_denom, dpi=200):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
     binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL,
-                                   cv2.CHAIN_APPROX_SIMPLE)
+    # RETR_EXTERNALだと、区画線同士が接続して1つの連結成分になった場合に
+    # 外側の輪郭しか取れず内部の筆界線が丸ごと消失する。RETR_CCOMPで
+    # 穴（=線に囲まれた個々の区画）も取得する（kouzu_to_geojson.pyと同方式）。
+    contours, hierarchy = cv2.findContours(binary, cv2.RETR_CCOMP,
+                                           cv2.CHAIN_APPROX_SIMPLE)
 
     px_scale = PT_MM * scale_denom * (72 / dpi)   # px → 実寸mm
     ph_mm    = pix.height * px_scale
     pw_mm    = pix.width  * px_scale
 
     border_lines, frame_lines = [], []
-    for cnt in contours:
+    for i, cnt in enumerate(contours):
         area = cv2.contourArea(cnt)
         if area < 100:
             continue
@@ -377,7 +380,10 @@ def main():
             else:
                 out_path = pdf_path.with_suffix('.' + args.format)
 
-            enc = 'cp932' if args.format == 'jwc' else 'utf-8'
+            # DXF R12(AC1009)にはUnicode文字コード指定の仕組みがなく、
+            # UTF-8のまま出力すると旧CAD(Jw_cad等)で地番の日本語が文字化けする。
+            # JWCと同じくShift_JIS系(cp932)で実バイト出力する。
+            enc = 'cp932'
             out_path.write_text(output_text, encoding=enc, errors='replace')
 
             print(f"  → 完了: {out_path.name}")
