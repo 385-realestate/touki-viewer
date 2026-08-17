@@ -903,8 +903,12 @@ def parse_kouku_history(kouku: str) -> list:
                     continue
                 addr    = am.group(1).strip()
                 持分_m  = re.search(r'持分([0-9]+分の[0-9]+)', line)
-                if not 持分_m and i + 2 < len(main_lines):
-                    持分_m = re.search(r'持分([0-9]+分の[0-9]+)', main_lines[i + 2])
+                if not 持分_m:
+                    for offset in [1, 2]:
+                        if i + offset < len(main_lines):
+                            持分_m = re.search(r'持分([0-9]+分の[0-9]+)', main_lines[i + offset])
+                            if 持分_m:
+                                break
                 持分 = 持分_m.group(1) if 持分_m else ""
                 name = ""
                 for offset in [1, 2]:
