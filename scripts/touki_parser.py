@@ -96,6 +96,9 @@ def extract_jp_name(cells: list) -> str:
         # \u5efa\u7269\u540d\uff0b\u968e\u6570\uff08\u4f4f\u6240\u7d9a\u304d\uff09: \u300c\u5bb62F\u300d\u300c\u8cb8\u5bb62F\u300d\u300cB1F\u300d\u306a\u3069\u672b\u5c3e\u304c\u6570\u5b57+F
         if re.search(r'[0-9]+[FfBb]$', s):
             continue
+        # 住所の改行残骸（1文字のみの号・番・棟・館等）: 「番17」＋次行「号」のような分割
+        if len(s) == 1 and s in '号番棟館階室丁目':
+            continue
         return s
     return ""
 
