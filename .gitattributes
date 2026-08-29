@@ -1,0 +1,23 @@
+# 改行コードを git 側で正規化（リポジトリ内は LF、チェックアウトは環境に合わせる）
+* text=auto
+
+# Windows で CRLF が必要なもの
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# 常に LF
+*.sh   text eol=lf
+
+# バイナリ（差分・マージ対象にしない）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.zip  binary
+*.dxf  binary
+*.parquet binary
