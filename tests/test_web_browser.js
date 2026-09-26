@@ -12,7 +12,24 @@ async function run() {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(process.env.TOUKI_BASE_URL || 'http://127.0.0.1:8510/touki/');
+    await page.evaluate(() => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['not a PDF'], 'drop-test.pdf', {type: 'application/pdf'}));
+      document.querySelector('#drop').dispatchEvent(new DragEvent('drop', {
+        bubbles: true, cancelable: true, dataTransfer: transfer
+      }));
+    });
+    if (!await page.locator('#selected-files').textContent().then(value => value.includes('drop-test.pdf'))) {
+      throw new Error('ドロップしたファイル名が表示されない');
+    }
+    if (await page.locator('#run').isDisabled()) throw new Error('ドロップ後に解析できない');
+    await page.click('#run');
+    await page.waitForFunction(() => document.querySelector('#status').textContent.startsWith('解析完了'));
+    if (!await page.locator('#results').textContent().then(value => value.includes('drop-test.pdf'))) {
+      throw new Error('ドロップしたPDFが解析に渡されない');
+    }
     await page.setInputFiles('#files', process.env.TOUKI_SAMPLE_PDF);
+    if (await page.locator('#results').textContent()) throw new Error('新しい選択時に前の結果が残る');
     await page.click('#run');
     await page.waitForFunction(() => document.querySelector('#status').textContent.startsWith('解析完了'),
       null, { timeout: 60000 });

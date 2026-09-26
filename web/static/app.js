@@ -3,6 +3,8 @@
   const prefix = document.body.dataset.prefix || '';
   const input = document.querySelector('#files');
   const drop = document.querySelector('#drop');
+  const dropTitle = document.querySelector('#drop-title');
+  const selectedFilesEl = document.querySelector('#selected-files');
   const run = document.querySelector('#run');
   const csv = document.querySelector('#csv');
   const historyCsv = document.querySelector('#history-csv');
@@ -12,6 +14,7 @@
   let results = [];
   let pdfUrls = [];
   let selected = 0;
+  let selectedFiles = [];
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -90,6 +93,28 @@
     if (results[selected]) render(results[selected], selected);
   }
 
+  function updateSelection(files) {
+    selectedFiles = Array.from(files || []);
+    pdfUrls.forEach(URL.revokeObjectURL);
+    pdfUrls = []; results = []; selected = 0;
+    tabs.replaceChildren(); resultsEl.replaceChildren();
+    csv.disabled = true; historyCsv.disabled = true;
+    dropTitle.textContent = selectedFiles.length
+      ? `${selectedFiles.length}件のファイルを選択しました`
+      : '登記簿PDFを選択、またはドロップ';
+    selectedFilesEl.textContent = selectedFiles.length
+      ? selectedFiles.map(file => file.name).join(' ／ ')
+      : 'ファイル未選択';
+    const invalid = selectedFiles.find(file => !/\.pdf$/i.test(file.name));
+    const tooMany = selectedFiles.length > 20;
+    const tooLarge = selectedFiles.reduce((total, file) => total + file.size, 0) > 50 * 1024 * 1024;
+    run.disabled = !selectedFiles.length || Boolean(invalid) || tooMany || tooLarge;
+    status.textContent = invalid ? 'PDF以外のファイルが含まれています'
+      : tooMany ? '一度に選択できるのは20件までです'
+      : tooLarge ? '合計50MB以下のPDFを選択してください'
+      : selectedFiles.length ? '選択しました。解析するを押してください' : 'PDFを選択してください';
+  }
+
   ['dragenter', 'dragover'].forEach(name => drop.addEventListener(name, event => {
     event.preventDefault(); drop.classList.add('drag');
   }));
@@ -97,13 +122,15 @@
     event.preventDefault(); drop.classList.remove('drag');
   }));
   drop.addEventListener('drop', event => {
-    input.files = event.dataTransfer.files;
-    status.textContent = `${input.files.length}件を選択中`;
+    event.preventDefault();
+    updateSelection(event.dataTransfer?.files);
   });
-  input.addEventListener('change', () => { status.textContent = `${input.files.length}件を選択中`; });
+  input.addEventListener('change', () => updateSelection(input.files));
+  window.addEventListener('dragover', event => event.preventDefault());
+  window.addEventListener('drop', event => event.preventDefault());
 
   run.addEventListener('click', async () => {
-    const files = [...input.files];
+    const files = selectedFiles;
     if (!files.length) { status.textContent = 'PDFを選択してください'; return; }
     run.disabled = true; csv.disabled = true; historyCsv.disabled = true;
     status.textContent = '解析中…';

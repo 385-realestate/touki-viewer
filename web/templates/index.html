@@ -16,10 +16,11 @@
       <label class="drop-zone" id="drop">
         <input id="files" type="file" accept="application/pdf,.pdf" multiple>
         <span class="drop-icon">⇧</span>
-        <strong>登記簿PDFを選択、またはドロップ</strong>
+        <strong id="drop-title">登記簿PDFを選択、またはドロップ</strong>
+        <output id="selected-files" class="selected-files" aria-live="polite">ファイル未選択</output>
         <small>最大20件・合計50MB。解析後に原本PDFと並べて確認できます。</small>
       </label>
-      <div class="toolbar"><button id="run" type="button">解析する</button>
+      <div class="toolbar"><button id="run" type="button" disabled>解析する</button>
         <button id="csv" type="button" class="secondary" disabled>一覧CSVを保存</button>
         <button id="history-csv" type="button" class="secondary" disabled>全履歴CSVを保存</button>
         <span id="status" role="status" aria-live="polite">PDFを選択してください</span>
