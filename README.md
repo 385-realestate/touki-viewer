@@ -25,7 +25,9 @@ python app.py
 ## Xserver VPS（Web版）
 
 `web_app.py` は既存の解析エンジンをFlask APIとして公開します。既定URLは
-`/touki/`、ヘルスチェックは `/touki/healthz` です。
+`/touki/`、ヘルスチェックは `/touki/healthz` です。Web画面では表題部・甲区・乙区・
+共同担保目録の全明細を表示し、原本PDFと照合できます。所有者だけの概要CSVに加えて、
+甲区・乙区・共同担保の全明細CSVを出力できます。解析漏れの可能性がある場合は警告を表示します。
 
 ```bash
 python -m venv .venv
@@ -34,8 +36,9 @@ TOUKI_DATA_DIR=/var/lib/touki-viewer .venv/bin/gunicorn \
   --bind 127.0.0.1:8510 web_app:app
 ```
 
-PDFは処理中だけ一時領域に保存され、応答後に削除されます。解析結果CSVはブラウザから
-ダウンロードできます。従来のWindowsデスクトップ版も引き続き利用できます。
+PDFは処理中だけ一時領域に保存され、応答後に削除されます。必要に応じて
+`TOUKI_TMP_DIR` で一時領域を指定できます。PDFの形式によって抽出漏れや誤読があり得るため、
+権利判断・転記前には必ず原本PDFを確認してください。従来のWindowsデスクトップ版も引き続き利用できます。
 
 ## フォルダ構成
 
