@@ -22,6 +22,21 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## Xserver VPS（Web版）
+
+`web_app.py` は既存の解析エンジンをFlask APIとして公開します。既定URLは
+`/touki/`、ヘルスチェックは `/touki/healthz` です。
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+TOUKI_DATA_DIR=/var/lib/touki-viewer .venv/bin/gunicorn \
+  --bind 127.0.0.1:8510 web_app:app
+```
+
+PDFは処理中だけ一時領域に保存され、応答後に削除されます。解析結果CSVはブラウザから
+ダウンロードできます。従来のWindowsデスクトップ版も引き続き利用できます。
+
 ## フォルダ構成
 
 ```

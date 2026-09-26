@@ -1,0 +1,18 @@
+[Unit]
+Description=Touki Viewer Web
+After=network.target
+
+[Service]
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/apps/touki-viewer
+Environment=TOUKI_DATA_DIR=/var/lib/touki-viewer
+Environment=TOUKI_URL_PREFIX=/touki
+ExecStart=/opt/apps/touki-viewer/.venv/bin/gunicorn --workers 2 --threads 2 --timeout 180 --bind 127.0.0.1:8510 web_app:app
+Restart=always
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

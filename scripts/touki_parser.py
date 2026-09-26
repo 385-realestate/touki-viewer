@@ -14,12 +14,16 @@ from pathlib import Path
 from datetime import datetime
 
 # ---- パス設定 ----
+import os as _os
 import sys as _sys
 if getattr(_sys, 'frozen', False):
     # PyInstaller exe: __file__ は _internal/scripts/ 内を指すため exe の親を使う
     BASE_DIR = Path(_sys.executable).parent
 else:
     BASE_DIR = Path(__file__).parent.parent
+
+# VPSでは永続データをリポジトリ外へ置けるようにする。未指定時は従来動作。
+BASE_DIR = Path(_os.environ.get("TOUKI_DATA_DIR", BASE_DIR))
 
 _TOUKI_BASE = BASE_DIR / "登記簿公図データ"
 INPUT_DIR   = _TOUKI_BASE          # PDFは登記簿公図データ直下
