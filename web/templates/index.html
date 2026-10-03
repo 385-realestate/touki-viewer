@@ -18,13 +18,22 @@
         <span class="drop-icon">⇧</span>
         <strong id="drop-title">登記簿PDFを選択、またはドロップ</strong>
         <output id="selected-files" class="selected-files" aria-live="polite">ファイル未選択</output>
-        <small>最大20件・合計50MB。解析後に原本PDFと並べて確認できます。</small>
+        <small>一度に最大10件・合計30MBまで。解析後に原本PDFと並べて確認できます。</small>
       </label>
       <div class="toolbar"><button id="run" type="button" disabled>解析する</button>
         <button id="csv" type="button" class="secondary" disabled>一覧CSVを保存</button>
         <button id="history-csv" type="button" class="secondary" disabled>全履歴CSVを保存</button>
         <span id="status" role="status" aria-live="polite">PDFを選択してください</span>
       </div>
+    </section>
+    <section class="notice" aria-label="ご利用上の注意">
+      <h2>ご利用上の注意</h2>
+      <ul>
+        <li>アップロードしたPDFはサーバーに保存せず、解析後すぐに削除します。解析結果もサーバーには残りません。</li>
+        <li>登記簿には所有者の氏名・住所などの個人情報が含まれます。ご自身が取得・利用できる書類のみ、自己責任でご利用ください。</li>
+        <li>表示結果は参考情報です。抽出の誤りや漏れがあり得るため、必ず原本をご確認ください。法律上の判断や登記申請の代わりにはなりません。</li>
+        <li>一度に解析できるのは10件・合計30MBまでです。短時間に連続で実行すると制限がかかる場合があります。</li>
+      </ul>
     </section>
     <nav id="document-tabs" class="document-tabs" aria-label="解析した書類"></nav>
     <section id="results" aria-live="polite"></section>

@@ -21,12 +21,12 @@ from agents.tochi_agent import TochiAgent
 from touki_parser import CSV_FIELDS_TATEMONO, CSV_FIELDS_TOCHI, detect_type, extract_text, split_sections
 
 PREFIX = os.environ.get("TOUKI_URL_PREFIX", "/touki").rstrip("/")
-MAX_FILES = int(os.environ.get("TOUKI_MAX_FILES", "20"))
+MAX_FILES = int(os.environ.get("TOUKI_MAX_FILES", "10"))
 
 app = Flask(__name__, template_folder="web/templates", static_folder="web/static",
             static_url_path=f"{PREFIX}/static")
 app.config.update(
-    MAX_CONTENT_LENGTH=int(os.environ.get("TOUKI_MAX_UPLOAD_MB", "50")) * 1024 * 1024,
+    MAX_CONTENT_LENGTH=int(os.environ.get("TOUKI_MAX_UPLOAD_MB", "30")) * 1024 * 1024,
     JSON_AS_ASCII=False,
 )
 

@@ -106,12 +106,12 @@
       ? selectedFiles.map(file => file.name).join(' ／ ')
       : 'ファイル未選択';
     const invalid = selectedFiles.find(file => !/\.pdf$/i.test(file.name));
-    const tooMany = selectedFiles.length > 20;
-    const tooLarge = selectedFiles.reduce((total, file) => total + file.size, 0) > 50 * 1024 * 1024;
+    const tooMany = selectedFiles.length > 10;
+    const tooLarge = selectedFiles.reduce((total, file) => total + file.size, 0) > 30 * 1024 * 1024;
     run.disabled = !selectedFiles.length || Boolean(invalid) || tooMany || tooLarge;
     status.textContent = invalid ? 'PDF以外のファイルが含まれています'
-      : tooMany ? '一度に選択できるのは20件までです'
-      : tooLarge ? '合計50MB以下のPDFを選択してください'
+      : tooMany ? '一度に選択できるのは10件までです'
+      : tooLarge ? '合計30MB以下のPDFを選択してください'
       : selectedFiles.length ? '選択しました。解析するを押してください' : 'PDFを選択してください';
   }
 
